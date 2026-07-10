@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/mssql": "^12.3.0",
     "@types/node": "^20.0.0",
+    "azure-functions-core-tools": "^4.12.1",
     "typescript": "^5.0.0"
   }
 }
