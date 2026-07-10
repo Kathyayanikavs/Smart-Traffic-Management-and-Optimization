@@ -13,7 +13,7 @@ export async function incidents(
         const result = await pool.request().query(`
             SELECT *
             FROM Incidents
-            ORDER BY reported_at DESC
+            ORDER BY timestamp DESC
         `);
 
         return {
