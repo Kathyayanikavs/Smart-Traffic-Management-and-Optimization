@@ -2,9 +2,17 @@ import React, { useState } from 'react';
 
 interface PredictiveAnalyticsProps {
   weather: 'sunny' | 'rainy' | 'snowy';
+  dbTraffic?: any[];
+  isLoading?: boolean;
+  error?: string | null;
 }
 
-export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ weather }) => {
+export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ 
+  weather,
+  dbTraffic = [],
+  isLoading = false,
+  error = null
+}) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   
   // Base 24 hours of traffic load data
@@ -25,11 +33,49 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ weathe
 
   // Scale curves according to current weather impact
   const weatherMultiplier = weather === 'rainy' ? 1.18 : weather === 'snowy' ? 1.35 : 1.0;
-  const data = baseData.map(d => ({
+  
+  let data = baseData.map(d => ({
     hour: d.hour,
     actual: Math.min(98, Math.round(d.actual * weatherMultiplier)),
     predicted: Math.min(98, Math.round(d.predicted * weatherMultiplier)),
   }));
+
+  // Overlay database actual traffic metrics if loaded
+  if (dbTraffic && dbTraffic.length > 0) {
+    const hourGroups: { [key: string]: { sum: number; count: number } } = {};
+    
+    dbTraffic.forEach(row => {
+      // Find row timestamp, handle potential variations (timestamp / date)
+      const timeStr = row.timestamp || row.Timestamp;
+      if (!timeStr) return;
+      
+      const date = new Date(timeStr);
+      if (isNaN(date.getTime())) return;
+      
+      const hourNum = date.getHours();
+      // Round to nearest 2-hour interval
+      const nearestTwo = Math.round(hourNum / 2) * 2 % 24;
+      const key = `${nearestTwo.toString().padStart(2, '0')}:00`;
+      
+      // Compute congestion level from database values
+      const rawCongestion = row.congestion_level !== undefined ? row.congestion_level : (row.vehicle_count / 40);
+      const val = Math.min(100, Math.max(0, Math.round(rawCongestion * 100)));
+      
+      if (!hourGroups[key]) {
+        hourGroups[key] = { sum: 0, count: 0 };
+      }
+      hourGroups[key].sum += val;
+      hourGroups[key].count += 1;
+    });
+
+    data = data.map(d => {
+      const group = hourGroups[d.hour];
+      return {
+        ...d,
+        actual: group ? Math.min(98, Math.round(group.sum / group.count)) : d.actual,
+      };
+    });
+  }
 
   // SVG Chart bounds
   const width = 450;
@@ -81,8 +127,8 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ weathe
           </svg>
           ML Congestion Forecasting (24h)
         </span>
-        <span className="badge-ui badge-yellow" style={{ fontSize: '10px' }}>
-          Azure ML Accuracy: 94.6%
+        <span className={`badge-ui ${error ? 'badge-red' : dbTraffic.length > 0 ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '10px' }}>
+          {isLoading ? 'Syncing...' : error ? 'Offline' : dbTraffic.length > 0 ? 'Azure SQL Live' : 'Azure ML Model'}
         </span>
       </div>
 
@@ -97,7 +143,17 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ weathe
         </div>
       </div>
 
-      <div className="chart-container" style={{ height: '140px' }}>
+      <div className="chart-container" style={{ height: '140px', position: 'relative' }}>
+        {isLoading ? (
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(9, 14, 26, 0.6)', color: 'var(--accent-cyan)', fontSize: '11px', zIndex: 10 }}>
+            Syncing predictive feeds...
+          </div>
+        ) : error ? (
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(9, 14, 26, 0.6)', color: 'var(--traffic-red)', fontSize: '11px', zIndex: 10, fontWeight: 'bold' }}>
+            ⚠️ Forecast Sync Failed: {error}
+          </div>
+        ) : null}
+
         <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`}>
           <defs>
             <linearGradient id="cyan-gradient" x1="0%" y1="0%" x2="0%" y2="100%">

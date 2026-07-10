@@ -4,9 +4,16 @@ import type { Road } from '../utils/trafficEngine';
 interface TelemetryTableProps {
   roads: Road[];
   onTriggerIncident: (roadId: string, type: 'accident' | 'construction' | 'hazard') => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
-export const TelemetryTable: React.FC<TelemetryTableProps> = ({ roads, onTriggerIncident }) => {
+export const TelemetryTable: React.FC<TelemetryTableProps> = ({ 
+  roads, 
+  onTriggerIncident,
+  isLoading = false,
+  error = null
+}) => {
   const [filterType, setFilterType] = useState<'all' | 'congested' | 'incidents'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -95,7 +102,20 @@ export const TelemetryTable: React.FC<TelemetryTableProps> = ({ roads, onTrigger
             </tr>
           </thead>
           <tbody>
-            {filteredRoads.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--accent-cyan)', padding: '24px' }}>
+                  <div className="status-dot loading" style={{ display: 'inline-block', marginRight: '8px' }}></div>
+                  Connecting and reading live Azure SQL Database...
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--traffic-red)', padding: '24px', fontWeight: 'bold' }}>
+                  ⚠️ API Fetch Error: {error}
+                </td>
+              </tr>
+            ) : filteredRoads.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
                   No active roadways fit the filter.
@@ -131,7 +151,7 @@ export const TelemetryTable: React.FC<TelemetryTableProps> = ({ roads, onTrigger
                       <button
                         className="btn btn-secondary btn-sm"
                         style={{ padding: '2px 8px', fontSize: '10px' }}
-                        onClick={() => onTriggerIncident(road.id, 'accident')} // triggers toggle off in controller
+                        onClick={() => onTriggerIncident(road.id, 'accident')}
                       >
                         Clear
                       </button>

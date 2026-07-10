@@ -41,6 +41,15 @@ export default function App() {
   const [subContact, setSubContact] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
+  // Azure SQL Database Integration States
+  const [dbTraffic, setDbTraffic] = useState<any[]>([]);
+  const [loadingTraffic, setLoadingTraffic] = useState(true);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
+  
+  const [dbIncidents, setDbIncidents] = useState<any[]>([]);
+  const [loadingIncidents, setLoadingIncidents] = useState(true);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
+  
   const [selectedJunctionId, setSelectedJunctionId] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<string[]>([]);
   const [isSimulating, setIsSimulating] = useState(true);
@@ -71,10 +80,49 @@ export default function App() {
       tickCount.current += 1;
       
       setVehicles(prevVehicles => {
-        // Move current vehicles
+        // Merge DB Traffic & Incidents into roads state for simulation input
+        let mergedRoads = roads;
+        
+        if (dbTraffic && dbTraffic.length > 0) {
+          mergedRoads = mergedRoads.map(r => {
+            const match = dbTraffic.find(
+              item => item.road_name === r.name || 
+                      item.road_name === r.id ||
+                      item.road_name?.toLowerCase() === r.name?.toLowerCase()
+            );
+            if (match) {
+              const rawCong = match.congestion_level !== undefined ? match.congestion_level : (match.vehicle_count / 40);
+              const mappedCongestion = rawCong > 1 ? rawCong / 100 : rawCong;
+              return {
+                ...r,
+                vehicleCount: match.vehicle_count !== undefined ? Number(match.vehicle_count) : r.vehicleCount,
+                congestion: Math.min(1.0, Math.max(0.05, Number(mappedCongestion))),
+                speedLimit: match.average_speed ? Number(match.average_speed) : r.speedLimit,
+              };
+            }
+            return r;
+          });
+        }
+
+        if (dbIncidents && dbIncidents.length > 0) {
+          mergedRoads = mergedRoads.map(r => {
+            const match = dbIncidents.find(
+              item => item.location === r.name || 
+                      item.location === r.id ||
+                      item.location?.toLowerCase() === r.name?.toLowerCase()
+            );
+            return {
+              ...r,
+              hasIncident: !!match,
+              incidentType: match ? match.incident_type || 'accident' : undefined,
+            };
+          });
+        }
+
+        // Move current vehicles using merged data
         const step = updateSimulationStep(
           junctions,
-          roads,
+          mergedRoads,
           prevVehicles,
           parking,
           sectors,
@@ -118,29 +166,62 @@ export default function App() {
     }, 1000 / simSpeed);
 
     return () => clearInterval(interval);
-  }, [isSimulating, simSpeed, junctions, roads, parking, sectors, weather, subContact]);
+  }, [isSimulating, simSpeed, junctions, roads, parking, sectors, weather, subContact, dbTraffic, dbIncidents]);
 
-  // Fetch initial incident reports from Azure Function API (with graceful fallback)
+  // 2. Fetch traffic and incidents periodically from Azure SQL Database
   useEffect(() => {
-    const fetchIncidents = async () => {
+    const fetchTraffic = async () => {
       try {
-        const res = await fetch('/api/incidents');
-        if (res.ok) {
-          const body = await res.json();
-          if (body.success && body.incidents) {
-            // Apply backend incidents to local simulation roads state
-            setRoads(prev => prev.map(r => {
-              const matched = body.incidents.find((inc: any) => inc.roadId === r.id);
-              return matched ? { ...r, hasIncident: true, incidentType: matched.type } : r;
-            }));
-            addAlert('Synced incidents from Azure Functions API.', 'success');
-          }
+        const res = await fetch('/api/trafficPrediction');
+        if (!res.ok) throw new Error("HTTP error " + res.status);
+        const body = await res.json();
+        
+        // SWA functions return jsonBody directly or wrapped in data
+        const data = body.data !== undefined ? body.data : body;
+        if (Array.isArray(data)) {
+          setDbTraffic(data);
+          setTrafficError(null);
+        } else {
+          throw new Error("Invalid response schema");
         }
-      } catch (e) {
-        console.warn('Azure Functions API not active, running with client-side mocked API fallback.');
+      } catch (e: any) {
+        setTrafficError(e.message);
+        console.warn('Azure Traffic API connection issue:', e.message);
+      } finally {
+        setLoadingTraffic(false);
       }
     };
-    fetchIncidents();
+
+    const fetchIncidentsList = async () => {
+      try {
+        const res = await fetch('/api/incidents');
+        if (!res.ok) throw new Error("HTTP error " + res.status);
+        const body = await res.json();
+        
+        const data = body.incidents !== undefined ? body.incidents : body;
+        if (Array.isArray(data)) {
+          setDbIncidents(data);
+          setIncidentsError(null);
+        } else {
+          throw new Error("Invalid response schema");
+        }
+      } catch (e: any) {
+        setIncidentsError(e.message);
+        console.warn('Azure Incidents API connection issue:', e.message);
+      } finally {
+        setLoadingIncidents(false);
+      }
+    };
+
+    fetchTraffic();
+    fetchIncidentsList();
+
+    const pollInterval = setInterval(() => {
+      fetchTraffic();
+      fetchIncidentsList();
+    }, 10000);
+
+    return () => clearInterval(pollInterval);
   }, []);
 
   // Handle emergency vehicle dispatch
@@ -337,16 +418,25 @@ export default function App() {
             <TelemetryTable 
               roads={roads}
               onTriggerIncident={(roadId) => handleReportIncident(roadId, 'accident')}
+              isLoading={loadingTraffic}
+              error={trafficError}
             />
             <IncidentManager
               roads={roads}
               onReportIncident={(roadId, type) => handleReportIncident(roadId, type)}
               onClearIncident={(roadId) => handleReportIncident(roadId, 'accident')}
+              isLoading={loadingIncidents}
+              error={incidentsError}
             />
           </div>
 
           <div className="dashboard-row">
-            <PredictiveAnalytics weather={weather} />
+            <PredictiveAnalytics 
+              weather={weather} 
+              dbTraffic={dbTraffic}
+              isLoading={loadingTraffic}
+              error={trafficError}
+            />
             <PollutionTracker sectors={sectors} />
           </div>
 

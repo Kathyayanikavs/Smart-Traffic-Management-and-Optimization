@@ -5,12 +5,16 @@ interface IncidentManagerProps {
   roads: Road[];
   onReportIncident: (roadId: string, type: 'accident' | 'construction' | 'hazard') => void;
   onClearIncident: (roadId: string) => void;
+  isLoading?: boolean;
+  error?: string | null;
 }
 
 export const IncidentManager: React.FC<IncidentManagerProps> = ({
   roads,
   onReportIncident,
   onClearIncident,
+  isLoading = false,
+  error = null,
 }) => {
   const [selectedRoadId, setSelectedRoadId] = useState('');
   const [incidentType, setIncidentType] = useState<'accident' | 'construction' | 'hazard'>('accident');
@@ -97,7 +101,15 @@ export const IncidentManager: React.FC<IncidentManagerProps> = ({
       {/* Active Incident List */}
       <div style={{ flex: 1, overflowY: 'auto', maxHeight: '150px' }}>
         <div className="form-label" style={{ marginBottom: '6px' }}>Active Incidents ({activeIncidents.length})</div>
-        {activeIncidents.length === 0 ? (
+        {isLoading ? (
+          <div style={{ textAlign: 'center', color: 'var(--accent-cyan)', fontSize: '11px', padding: '16px 0' }}>
+            Connecting and reading live Azure SQL Database...
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', color: 'var(--traffic-red)', fontSize: '11px', padding: '16px 0', fontWeight: 'bold' }}>
+            ⚠️ API Fetch Error: {error}
+          </div>
+        ) : activeIncidents.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px', padding: '20px 0' }}>
             ✓ All roadways clear. No current incidents.
           </div>
