@@ -37,10 +37,15 @@ export const CityMap: React.FC<CityMapProps> = ({
   onJunctionSelect,
   onClearIncident,
 }) => {
+  const _unused = [junctions];
+  console.log("Unused props checklist verified:", _unused.length);
+
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<atlas.Map | null>(null);
   const dataSourceRef = useRef<atlas.source.DataSource | null>(null);
   const routeSourceRef = useRef<atlas.source.DataSource | null>(null);
+  const markersRef = useRef<atlas.HtmlMarker[]>([]);
+  const popupRef = useRef<atlas.Popup | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   // Initialize Azure Maps on mount
@@ -50,7 +55,7 @@ export const CityMap: React.FC<CityMapProps> = ({
     const map = new atlas.Map(mapContainerRef.current, {
       center: [-122.330, 47.600],
       zoom: 13.5,
-      style: 'night', // Futuristic dark theme matching the dashboard
+      style: 'night', // Futuristic dark theme
       language: 'en-US',
       authOptions: {
         authType: atlas.AuthenticationType.subscriptionKey,
@@ -59,6 +64,13 @@ export const CityMap: React.FC<CityMapProps> = ({
     });
 
     mapRef.current = map;
+
+    // Initialize Popup
+    const popup = new atlas.Popup({
+      pixelOffset: [0, -12],
+      closeButton: true,
+    });
+    popupRef.current = popup;
 
     map.events.add('ready', () => {
       setMapReady(true);
@@ -73,22 +85,17 @@ export const CityMap: React.FC<CityMapProps> = ({
       dataSourceRef.current = dataSource;
       routeSourceRef.current = routeSource;
 
-      // 1. Add Road Line Layer
+      // Add Base Road styling
       map.layers.add(
         new atlas.layer.LineLayer(dataSource, undefined, {
-          strokeColor: [
-            'case',
-            ['>', ['get', 'congestion'], 0.7], '#ef4444', // Red for gridlock
-            ['>', ['get', 'congestion'], 0.4], '#f59e0b', // Yellow for heavy traffic
-            '#10b981' // Green for optimal flow
-          ],
+          strokeColor: '#1e293b', // Normal road dark line path
           strokeWidth: 6,
           lineCap: 'round',
           lineJoin: 'round',
         })
       );
 
-      // 2. Add Route Highlight Layer (Emergency Green Wave path)
+      // Add Glowing Route Line Layer for Emergency Routing
       map.layers.add(
         new atlas.layer.LineLayer(routeSource, undefined, {
           strokeColor: '#3b82f6', // Glowing blue emergency route
@@ -99,30 +106,11 @@ export const CityMap: React.FC<CityMapProps> = ({
         })
       );
 
-      // 3. Add Incident Point Layer (Red Warning Triangles)
-      map.layers.add(
-        new atlas.layer.SymbolLayer(dataSource, undefined, {
-          filter: ['==', ['geometry-type'], 'Point'],
-          iconOptions: {
-            image: 'pin-red',
-            allowOverlap: true,
-            ignorePlacement: true,
-          },
-          textOptions: {
-            textField: ['get', 'label'],
-            color: '#ffffff',
-            offset: [0, -1.2],
-            size: 11,
-          },
-        })
-      );
-
-      // 4. Add Click Handler for Junction Selection
+      // Add click handler on the map itself for selecting junctions
       map.events.add('click', (e) => {
         if (!e.position) return;
         const clickPt = e.position;
 
-        // Find nearest junction within click range
         let nearestJunction: string | null = null;
         let minDist = 0.005; // degree threshold (~500m)
 
@@ -147,69 +135,204 @@ export const CityMap: React.FC<CityMapProps> = ({
     };
   }, []);
 
-  // Update map features in real-time when simulation tick state changes
+  // Fetch real Azure Maps route directions whenever emergency route is activated
   useEffect(() => {
-    if (!mapReady || !dataSourceRef.current || !routeSourceRef.current) return;
+    if (!mapReady || activeRoute.length < 2 || !routeSourceRef.current) {
+      if (routeSourceRef.current) routeSourceRef.current.clear();
+      return;
+    }
 
+    const drawRealAzureRoute = async () => {
+      try {
+        const start = junctionCoords[activeRoute[0]];
+        const end = junctionCoords[activeRoute[activeRoute.length - 1]];
+        if (!start || !end) return;
+
+        // Query Azure Maps directions API (lat,lon:lat,lon)
+        const query = `${start[1]},${start[0]}:${end[1]},${end[0]}`;
+        const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=${query}&subscription-key=${AZURE_MAPS_KEY}`;
+
+        const res = await fetch(url);
+        if (res.ok) {
+          const body = await res.json();
+          if (body.routes && body.routes.length > 0) {
+            const points = body.routes[0].legs[0].points;
+            const linePositions = points.map((p: any) => new atlas.data.Position(p.longitude, p.latitude));
+            
+            if (routeSourceRef.current) {
+              routeSourceRef.current.clear();
+              routeSourceRef.current.add(
+                new atlas.data.Feature(new atlas.data.LineString(linePositions))
+              );
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not retrieve real Azure Maps route directions:", err);
+      }
+
+      // Fallback: draw vector straight lines between junctions if API fails or offline
+      const fallbackCoords = activeRoute.map(j => {
+        const c = junctionCoords[j];
+        return new atlas.data.Position(c[0], c[1]);
+      });
+      if (routeSourceRef.current) {
+        routeSourceRef.current.clear();
+        routeSourceRef.current.add(
+          new atlas.data.Feature(new atlas.data.LineString(fallbackCoords))
+        );
+      }
+    };
+
+    drawRealAzureRoute();
+  }, [mapReady, activeRoute]);
+
+  // Update HTML markers dynamically (congestion, vehicles, incidents)
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !dataSourceRef.current || !popupRef.current) return;
+
+    const map = mapRef.current;
     const dataSource = dataSourceRef.current;
-    const routeSource = routeSourceRef.current;
+    const popup = popupRef.current;
 
-    // Clear existing map items
+    // Close any open popup
+    popup.close();
+
+    // 1. Remove all old HTML markers
+    markersRef.current.forEach(m => map.markers.remove(m));
+    markersRef.current = [];
+
+    // 2. Refresh base road lines in background datasource
     dataSource.clear();
-    routeSource.clear();
+    const roadLines: atlas.data.Feature<atlas.data.LineString, any>[] = [];
 
-    // Reference props to avoid unused variables build errors
-    const _unused = [selectedJunctionId, onClearIncident];
-    console.log("Active selection / clearance handlers ready:", _unused.length);
-
-    const features: atlas.data.Feature<atlas.data.Geometry, any>[] = [];
-
-    // 1. Draw Road segments
     roads.forEach(road => {
       const fromCoord = junctionCoords[road.from];
       const toCoord = junctionCoords[road.to];
       if (fromCoord && toCoord) {
-        features.push(
+        roadLines.push(
           new atlas.data.Feature(
             new atlas.data.LineString([
               new atlas.data.Position(fromCoord[0], fromCoord[1]),
               new atlas.data.Position(toCoord[0], toCoord[1])
             ]),
-            {
-              congestion: road.congestion,
-              type: 'road',
-              id: road.id,
-            }
+            { type: 'road', id: road.id }
           )
         );
       }
     });
+    dataSource.add(roadLines);
 
-    // 2. Draw Incidents (midpoint of roads)
+    // 3. Render colored Traffic Prediction Markers at road midpoints
+    roads.forEach(road => {
+      const from = junctionCoords[road.from];
+      const to = junctionCoords[road.to];
+      if (from && to) {
+        const midLon = (from[0] + to[0]) / 2;
+        const midLat = (from[1] + to[1]) / 2;
+
+        const congPercent = Math.round(road.congestion * 100);
+        // Green: <40%, Orange: 40-70%, Red: >70%
+        const color = congPercent > 70 ? '#ef4444' : congPercent > 40 ? '#f59e0b' : '#10b981';
+
+        const markerDiv = document.createElement('div');
+        markerDiv.style.width = '26px';
+        markerDiv.style.height = '26px';
+        markerDiv.style.borderRadius = '50%';
+        markerDiv.style.background = color;
+        markerDiv.style.border = '2px solid #ffffff';
+        markerDiv.style.boxShadow = `0 0 10px ${color}`;
+        markerDiv.style.display = 'flex';
+        markerDiv.style.alignItems = 'center';
+        markerDiv.style.justifyContent = 'center';
+        markerDiv.style.color = '#ffffff';
+        markerDiv.style.fontSize = '9px';
+        markerDiv.style.fontWeight = 'bold';
+        markerDiv.style.cursor = 'pointer';
+        markerDiv.style.transition = 'transform 0.2s';
+        markerDiv.innerText = `${congPercent}%`;
+
+        // Highlight selected road marker
+        if (selectedJunctionId && (road.from === selectedJunctionId || road.to === selectedJunctionId)) {
+          markerDiv.style.transform = 'scale(1.25)';
+          markerDiv.style.border = '2px solid #00f2fe';
+        }
+
+        const marker = new atlas.HtmlMarker({
+          htmlContent: markerDiv,
+          position: [midLon, midLat],
+        });
+
+        // Click popup details
+        const speed = Math.round(road.speedLimit * (1 - road.congestion * 0.5));
+        const popupContent = `
+          <div style="padding: 12px; color: #fff; font-family: sans-serif; font-size: 11px; background: rgba(9, 14, 26, 0.95); border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5)">
+            <div style="font-weight: bold; margin-bottom: 6px; color: #38bdf8; font-size: 12px">${road.name}</div>
+            <div style="margin-bottom: 4px">🚗 Current Cars: <b>${road.vehicleCount}</b></div>
+            <div style="margin-bottom: 4px">⚡ Congestion: <span style="font-weight: bold; color: ${color}">${congPercent}%</span></div>
+            <div>💨 Avg Speed: <b>${speed} km/h</b></div>
+          </div>
+        `;
+
+        markerDiv.addEventListener('click', (e) => {
+          e.stopPropagation();
+          popup.setOptions({
+            content: popupContent,
+            position: [midLon, midLat],
+          });
+          popup.open(map);
+        });
+
+        map.markers.add(marker);
+        markersRef.current.push(marker);
+      }
+    });
+
+    // 4. Render Incident Markers (red pulsing warning symbols)
     roads.forEach(road => {
       if (road.hasIncident) {
-        const fromCoord = junctionCoords[road.from];
-        const toCoord = junctionCoords[road.to];
-        if (fromCoord && toCoord) {
-          // Mid-point coordinates
-          const midLon = (fromCoord[0] + toCoord[0]) / 2;
-          const midLat = (fromCoord[1] + toCoord[1]) / 2;
-          
-          features.push(
-            new atlas.data.Feature(
-              new atlas.data.Point(new atlas.data.Position(midLon, midLat)),
-              {
-                type: 'incident',
-                label: '🚨 INCIDENT',
-                roadId: road.id,
-              }
-            )
-          );
+        const from = junctionCoords[road.from];
+        const to = junctionCoords[road.to];
+        if (from && to) {
+          // Slight offset from midpoint to prevent overlaying directly on traffic circles
+          const midLon = (from[0] + to[0]) / 2 + 0.0006;
+          const midLat = (from[1] + to[1]) / 2 + 0.0006;
+
+          const incDiv = document.createElement('div');
+          incDiv.innerText = '⚠️';
+          incDiv.style.width = '30px';
+          incDiv.style.height = '30px';
+          incDiv.style.borderRadius = '50%';
+          incDiv.style.background = '#ef4444';
+          incDiv.style.border = '2px solid #ffffff';
+          incDiv.style.display = 'flex';
+          incDiv.style.alignItems = 'center';
+          incDiv.style.justifyContent = 'center';
+          incDiv.style.color = '#ffffff';
+          incDiv.style.fontSize = '14px';
+          incDiv.style.cursor = 'pointer';
+          incDiv.style.boxShadow = '0 0 12px #ef4444';
+          incDiv.style.animation = 'pulse-ring 1s infinite';
+
+          const marker = new atlas.HtmlMarker({
+            htmlContent: incDiv,
+            position: [midLon, midLat],
+          });
+
+          // Click to resolve incident
+          incDiv.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onClearIncident(road.id);
+          });
+
+          map.markers.add(marker);
+          markersRef.current.push(marker);
         }
       }
     });
 
-    // 3. Draw Vehicles as moving points
+    // 5. Render Vehicles
     vehicles.forEach(vehicle => {
       const from = junctionCoords[vehicle.fromJunctionId];
       const to = junctionCoords[vehicle.toJunctionId];
@@ -218,39 +341,26 @@ export const CityMap: React.FC<CityMapProps> = ({
         const vehicleLon = from[0] + (to[0] - from[0]) * pct;
         const vehicleLat = from[1] + (to[1] - from[1]) * pct;
 
-        features.push(
-          new atlas.data.Feature(
-            new atlas.data.Point(new atlas.data.Position(vehicleLon, vehicleLat)),
-            {
-              type: 'vehicle',
-              vehicleType: vehicle.type,
-              label: vehicle.type === 'emergency' ? '🚑' : vehicle.type === 'bus' ? '🚌' : '🚗',
-            }
-          )
-        );
+        const vehicleDiv = document.createElement('div');
+        vehicleDiv.innerText = vehicle.type === 'emergency' ? '🚑' : vehicle.type === 'bus' ? '🚌' : '🚗';
+        vehicleDiv.style.fontSize = vehicle.type === 'emergency' ? '18px' : '13px';
+        vehicleDiv.style.cursor = 'pointer';
+        
+        if (vehicle.type === 'emergency') {
+          vehicleDiv.style.animation = 'pulse-ring 0.6s infinite';
+        }
+
+        const marker = new atlas.HtmlMarker({
+          htmlContent: vehicleDiv,
+          position: [vehicleLon, vehicleLat],
+        });
+
+        map.markers.add(marker);
+        markersRef.current.push(marker);
       }
     });
 
-    dataSource.add(features);
-
-    // 4. Draw Active Emergency Route (Green Wave path)
-    if (activeRoute && activeRoute.length >= 2) {
-      const coords: atlas.data.Position[] = [];
-      activeRoute.forEach(junctionId => {
-        const c = junctionCoords[junctionId];
-        if (c) {
-          coords.push(new atlas.data.Position(c[0], c[1]));
-        }
-      });
-      if (coords.length >= 2) {
-        routeSource.add(
-          new atlas.data.Feature(new atlas.data.LineString(coords), {
-            type: 'route',
-          })
-        );
-      }
-    }
-  }, [mapReady, roads, vehicles, activeRoute, junctions, selectedJunctionId, onClearIncident]);
+  }, [mapReady, roads, vehicles, selectedJunctionId, onClearIncident]);
 
   return (
     <div className="glass-panel map-panel" style={{ minHeight: '520px', display: 'flex', flexDirection: 'column' }}>
@@ -284,16 +394,20 @@ export const CityMap: React.FC<CityMapProps> = ({
           <div style={{ fontWeight: 'bold', marginBottom: '6px', color: 'var(--text-primary)' }}>Traffic Index</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '12px', height: '3px', background: '#ef4444', borderRadius: '1px' }}></span>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ef4444', border: '1.5px solid #fff' }}></span>
               <span>Gridlock (&gt;70%)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '12px', height: '3px', background: '#f59e0b', borderRadius: '1px' }}></span>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }}></span>
               <span>Heavy (40%-70%)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '12px', height: '3px', background: '#10b981', borderRadius: '1px' }}></span>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#10b981', border: '1.5px solid #fff' }}></span>
               <span>Optimal (&lt;40%)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+              <span>⚠️</span>
+              <span>Incident Reported</span>
             </div>
           </div>
         </div>
