@@ -217,6 +217,19 @@ export default function App() {
       }
     };
 
+    fetchTraffic();
+    fetchIncidentsList();
+
+    const pollInterval = setInterval(() => {
+      fetchTraffic();
+      fetchIncidentsList();
+    }, 10000);
+
+    return () => clearInterval(pollInterval);
+  }, []);
+
+  // 3. Fetch predictions periodically from Azure SQL Database (every 30 seconds)
+  useEffect(() => {
     const fetchPredictions = async () => {
       try {
         const res = await fetch('/api/predictTraffic');
@@ -238,15 +251,9 @@ export default function App() {
       }
     };
 
-    fetchTraffic();
-    fetchIncidentsList();
     fetchPredictions();
 
-    const pollInterval = setInterval(() => {
-      fetchTraffic();
-      fetchIncidentsList();
-      fetchPredictions();
-    }, 10000);
+    const pollInterval = setInterval(fetchPredictions, 30000);
 
     return () => clearInterval(pollInterval);
   }, []);
