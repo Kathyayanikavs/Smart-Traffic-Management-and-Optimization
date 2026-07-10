@@ -49,6 +49,10 @@ export default function App() {
   const [dbIncidents, setDbIncidents] = useState<any[]>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
   const [incidentsError, setIncidentsError] = useState<string | null>(null);
+
+  const [predictionsData, setPredictionsData] = useState<any[]>([]);
+  const [loadingPredictions, setLoadingPredictions] = useState(true);
+  const [predictionsError, setPredictionsError] = useState<string | null>(null);
   
   const [selectedJunctionId, setSelectedJunctionId] = useState<string | null>(null);
   const [activeRoute, setActiveRoute] = useState<string[]>([]);
@@ -168,7 +172,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isSimulating, simSpeed, junctions, roads, parking, sectors, weather, subContact, dbTraffic, dbIncidents]);
 
-  // 2. Fetch traffic and incidents periodically from Azure SQL Database
+  // 2. Fetch traffic, incidents, and predictions periodically from Azure SQL Database
   useEffect(() => {
     const fetchTraffic = async () => {
       try {
@@ -213,12 +217,35 @@ export default function App() {
       }
     };
 
+    const fetchPredictions = async () => {
+      try {
+        const res = await fetch('/api/predictTraffic');
+        if (!res.ok) throw new Error("HTTP error " + res.status);
+        const body = await res.json();
+        
+        const data = body.predictions !== undefined ? body.predictions : body;
+        if (Array.isArray(data)) {
+          setPredictionsData(data);
+          setPredictionsError(null);
+        } else {
+          throw new Error("Invalid response schema");
+        }
+      } catch (e: any) {
+        setPredictionsError(e.message);
+        console.warn('Azure predictTraffic API connection issue:', e.message);
+      } finally {
+        setLoadingPredictions(false);
+      }
+    };
+
     fetchTraffic();
     fetchIncidentsList();
+    fetchPredictions();
 
     const pollInterval = setInterval(() => {
       fetchTraffic();
       fetchIncidentsList();
+      fetchPredictions();
     }, 10000);
 
     return () => clearInterval(pollInterval);
@@ -434,8 +461,9 @@ export default function App() {
             <PredictiveAnalytics 
               weather={weather} 
               dbTraffic={dbTraffic}
-              isLoading={loadingTraffic}
-              error={trafficError}
+              predictionsData={predictionsData}
+              isLoading={loadingPredictions || loadingTraffic}
+              error={predictionsError || trafficError}
             />
             <PollutionTracker sectors={sectors} />
           </div>

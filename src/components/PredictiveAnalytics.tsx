@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 interface PredictiveAnalyticsProps {
   weather: 'sunny' | 'rainy' | 'snowy';
   dbTraffic?: any[];
+  predictionsData?: any[];
   isLoading?: boolean;
   error?: string | null;
 }
@@ -10,6 +11,7 @@ interface PredictiveAnalyticsProps {
 export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({ 
   weather,
   dbTraffic = [],
+  predictionsData = [],
   isLoading = false,
   error = null
 }) => {
@@ -21,12 +23,12 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
     { hour: '02:00', actual: 8, predicted: 10 },
     { hour: '04:00', actual: 15, predicted: 12 },
     { hour: '06:00', actual: 35, predicted: 38 },
-    { hour: '08:00', actual: 82, predicted: 85 }, // Morning Peak
+    { hour: '08:00', actual: 82, predicted: 85 },
     { hour: '10:00', actual: 60, predicted: 58 },
-    { hour: '12:00', actual: 65, predicted: 68 }, // Midday Lunch
+    { hour: '12:00', actual: 65, predicted: 68 },
     { hour: '14:00', actual: 55, predicted: 54 },
-    { hour: '16:00', actual: 78, predicted: 75 }, // Evening Peak Starts
-    { hour: '18:00', actual: 88, predicted: 82 }, // Evening Peak Peak
+    { hour: '16:00', actual: 78, predicted: 75 },
+    { hour: '18:00', actual: 88, predicted: 82 },
     { hour: '20:00', actual: 48, predicted: 50 },
     { hour: '22:00', actual: 25, predicted: 22 },
   ];
@@ -45,7 +47,6 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
     const hourGroups: { [key: string]: { sum: number; count: number } } = {};
     
     dbTraffic.forEach(row => {
-      // Find row timestamp, handle potential variations (timestamp / date)
       const timeStr = row.timestamp || row.Timestamp;
       if (!timeStr) return;
       
@@ -53,11 +54,9 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
       if (isNaN(date.getTime())) return;
       
       const hourNum = date.getHours();
-      // Round to nearest 2-hour interval
       const nearestTwo = Math.round(hourNum / 2) * 2 % 24;
       const key = `${nearestTwo.toString().padStart(2, '0')}:00`;
       
-      // Compute congestion level from database values
       const rawCongestion = row.congestion_level !== undefined ? row.congestion_level : (row.vehicle_count / 40);
       const val = Math.min(100, Math.max(0, Math.round(rawCongestion * 100)));
       
@@ -77,13 +76,26 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
     });
   }
 
+  // Calculate live average congestion and speed project updates from predictTraffic API
+  const avgPredCongestion = predictionsData.length > 0
+    ? Math.round(predictionsData.reduce((acc, p) => acc + p.predicted_congestion, 0) / predictionsData.length)
+    : 72;
+
+  const avgCurrentSpeed = predictionsData.length > 0
+    ? predictionsData.reduce((acc, p) => acc + p.current_speed, 0) / predictionsData.length
+    : 40;
+  const avgPredSpeed = predictionsData.length > 0
+    ? predictionsData.reduce((acc, p) => acc + p.predicted_speed, 0) / predictionsData.length
+    : 38;
+  const speedDiff = avgPredSpeed - avgCurrentSpeed;
+  const speedPercent = avgCurrentSpeed > 0 ? (speedDiff / avgCurrentSpeed) * 100 : 0;
+
   // SVG Chart bounds
   const width = 450;
   const height = 140;
   const paddingX = 40;
   const paddingY = 20;
 
-  // Scale functions
   const getX = (index: number) => {
     return paddingX + (index / (data.length - 1)) * (width - 2 * paddingX);
   };
@@ -92,7 +104,6 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
     return height - paddingY - (value / 100) * (height - 2 * paddingY);
   };
 
-  // Generate path strings
   let actualPath = '';
   let predictedPath = '';
   let actualArea = '';
@@ -127,19 +138,21 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
           </svg>
           ML Congestion Forecasting (24h)
         </span>
-        <span className={`badge-ui ${error ? 'badge-red' : dbTraffic.length > 0 ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '10px' }}>
-          {isLoading ? 'Syncing...' : error ? 'Offline' : dbTraffic.length > 0 ? 'Azure SQL Live' : 'Azure ML Model'}
+        <span className={`badge-ui ${error ? 'badge-red' : predictionsData.length > 0 ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '10px' }}>
+          {isLoading ? 'Syncing...' : error ? 'Offline' : predictionsData.length > 0 ? 'Azure SQL Live' : 'Azure ML Model'}
         </span>
       </div>
 
       <div className="stats-grid" style={{ marginBottom: '14px' }}>
         <div className="stat-card" style={{ padding: '8px 12px' }}>
-          <span className="stat-label">Peak hour forecast</span>
-          <span className="stat-value purple" style={{ fontSize: '16px' }}>17:30 - 18:45</span>
+          <span className="stat-label">Predicted Congestion (Avg)</span>
+          <span className="stat-value purple" style={{ fontSize: '16px' }}>{avgPredCongestion}% Load</span>
         </div>
         <div className="stat-card" style={{ padding: '8px 12px' }}>
-          <span className="stat-label">AI mitigation impact</span>
-          <span className="stat-value green" style={{ fontSize: '16px' }}>-22% Wait Time</span>
+          <span className="stat-label">Predicted Speed flow</span>
+          <span className={`stat-value ${speedPercent >= 0 ? 'green' : 'yellow'}`} style={{ fontSize: '16px' }}>
+            {speedPercent >= 0 ? '+' : ''}{speedPercent.toFixed(1)}% Speed
+          </span>
         </div>
       </div>
 
@@ -162,7 +175,6 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
             </linearGradient>
           </defs>
 
-          {/* Gridlines */}
           {[0, 25, 50, 75, 100].map(val => (
             <g key={`grid-${val}`}>
               <line
@@ -178,17 +190,14 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
             </g>
           ))}
 
-          {/* Paths */}
           <path d={actualArea} className="chart-area-actual" />
           <path d={actualPath} className="chart-line-actual" />
           <path d={predictedPath} className="chart-line-predicted" />
 
-          {/* Interaction vertical lines */}
           {data.map((_, i) => {
             const x = getX(i);
             return (
               <g key={`hit-${i}`}>
-                {/* Hit Box */}
                 <line
                   x1={x}
                   y1={paddingY}
@@ -216,7 +225,6 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
             );
           })}
 
-          {/* Hour labels on X axis */}
           {data.filter((_, i) => i % 2 === 0).map((d, i) => {
             const index = i * 2;
             return (
@@ -233,7 +241,6 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
           })}
         </svg>
 
-        {/* Hover Tooltip */}
         {hoverIndex !== null && (
           <div
             className="chart-tooltip"
@@ -249,7 +256,7 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
         )}
       </div>
 
-      <div className="chart-legend">
+      <div className="chart-legend" style={{ marginBottom: '10px' }}>
         <div className="legend-item">
           <span className="legend-dot" style={{ background: 'var(--accent-cyan)' }}></span>
           <span>Actual Load</span>
@@ -259,6 +266,31 @@ export const PredictiveAnalytics: React.FC<PredictiveAnalyticsProps> = ({
           <span>Azure ML Prediction</span>
         </div>
       </div>
+
+      {/* Live Azure ML Roadway Predictions */}
+      {predictionsData && predictionsData.length > 0 && (
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Live Azure ML Predictions by Roadway
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+            {predictionsData.slice(0, 4).map((pred, i) => (
+              <div key={i} style={{ background: 'rgba(15, 23, 42, 0.4)', border: '1px solid rgba(255,255,255,0.04)', padding: '8px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                  <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '140px' }}>{pred.road_name}</span>
+                  <span style={{ color: pred.predicted_congestion > 70 ? 'var(--traffic-red)' : 'var(--accent-cyan)' }}>
+                    {pred.predicted_congestion}%
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  <span>Speed: {pred.predicted_speed} km/h</span>
+                  <span>Cars: {pred.current_vehicle_count}➔{pred.predicted_vehicle_count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
