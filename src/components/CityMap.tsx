@@ -26,7 +26,7 @@ const junctionCoords: { [key: string]: [number, number] } = {
   J9: [-122.315, 47.585], // Bottom-Right
 };
 
-const AZURE_MAPS_KEY = import.meta.env.VITE_AZURE_MAPS_KEY || 'YOUR_AZURE_MAPS_SUBSCRIPTION_KEY';
+const AZURE_MAPS_KEY_FALLBACK = import.meta.env.VITE_AZURE_MAPS_KEY || 'YOUR_AZURE_MAPS_SUBSCRIPTION_KEY';
 
 export const CityMap: React.FC<CityMapProps> = ({
   junctions,
@@ -46,11 +46,43 @@ export const CityMap: React.FC<CityMapProps> = ({
   const routeSourceRef = useRef<atlas.source.DataSource | null>(null);
   const markersRef = useRef<atlas.HtmlMarker[]>([]);
   const popupRef = useRef<atlas.Popup | null>(null);
+
+  const [subscriptionKey, setSubscriptionKey] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<boolean>(false);
   const [mapReady, setMapReady] = useState(false);
 
-  // Initialize Azure Maps on mount
+  // Retrieve Azure Maps subscription key from runtime API or build fallback
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    const fetchMapsKey = async () => {
+      try {
+        const res = await fetch('/api/mapsKey');
+        if (res.ok) {
+          const body = await res.json();
+          if (body.key && body.key !== "YOUR_AZURE_MAPS_SUBSCRIPTION_KEY") {
+            setSubscriptionKey(body.key);
+            setKeyError(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch maps key from runtime API endpoint:", err);
+      }
+
+      // Check build-time environment variable fallback
+      if (AZURE_MAPS_KEY_FALLBACK !== "YOUR_AZURE_MAPS_SUBSCRIPTION_KEY") {
+        setSubscriptionKey(AZURE_MAPS_KEY_FALLBACK);
+        setKeyError(false);
+      } else {
+        setKeyError(true);
+      }
+    };
+
+    fetchMapsKey();
+  }, []);
+
+  // Initialize Azure Maps only once we have a subscription key
+  useEffect(() => {
+    if (!subscriptionKey || !mapContainerRef.current) return;
 
     const map = new atlas.Map(mapContainerRef.current, {
       center: [-122.330, 47.600],
@@ -59,7 +91,7 @@ export const CityMap: React.FC<CityMapProps> = ({
       language: 'en-US',
       authOptions: {
         authType: atlas.AuthenticationType.subscriptionKey,
-        subscriptionKey: AZURE_MAPS_KEY,
+        subscriptionKey: subscriptionKey,
       },
     });
 
@@ -133,11 +165,11 @@ export const CityMap: React.FC<CityMapProps> = ({
         mapRef.current.dispose();
       }
     };
-  }, []);
+  }, [subscriptionKey]);
 
   // Fetch real Azure Maps route directions whenever emergency route is activated
   useEffect(() => {
-    if (!mapReady || activeRoute.length < 2 || !routeSourceRef.current) {
+    if (!mapReady || !subscriptionKey || activeRoute.length < 2 || !routeSourceRef.current) {
       if (routeSourceRef.current) routeSourceRef.current.clear();
       return;
     }
@@ -150,7 +182,7 @@ export const CityMap: React.FC<CityMapProps> = ({
 
         // Query Azure Maps directions API (lat,lon:lat,lon)
         const query = `${start[1]},${start[0]}:${end[1]},${end[0]}`;
-        const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=${query}&subscription-key=${AZURE_MAPS_KEY}`;
+        const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=${query}&subscription-key=${subscriptionKey}`;
 
         const res = await fetch(url);
         if (res.ok) {
@@ -186,7 +218,7 @@ export const CityMap: React.FC<CityMapProps> = ({
     };
 
     drawRealAzureRoute();
-  }, [mapReady, activeRoute]);
+  }, [mapReady, activeRoute, subscriptionKey]);
 
   // Update HTML markers dynamically (congestion, vehicles, incidents)
   useEffect(() => {
@@ -389,6 +421,23 @@ export const CityMap: React.FC<CityMapProps> = ({
           style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} 
         />
         
+        {/* Helper Banner when Key is Missing/Invalid */}
+        {keyError && (
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(9, 14, 26, 0.92)', padding: '24px', textAlign: 'center', zIndex: 20 }}>
+            <span style={{ fontSize: '32px', marginBottom: '12px' }}>🔑</span>
+            <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#fff', marginBottom: '8px' }}>Azure Maps Key Required</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '320px', lineHeight: '1.5', marginBottom: '16px' }}>
+              The Map SDK is ready, but no authenticated Subscription Key has been configured in your Azure environment variables.
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', padding: '10px 14px', borderRadius: '6px', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace', textAlign: 'left', maxWidth: '360px' }}>
+              1. Go to Azure SWA Portal Settings<br />
+              2. Click "Configuration" -&gt; "Application settings"<br />
+              3. Add: <span style={{ color: 'var(--accent-cyan)' }}>AZURE_MAPS_KEY</span> = <span style={{ color: 'var(--accent-purple)' }}>YOUR_AZURE_MAPS_KEY</span><br />
+              4. Click "Save" to immediately go live!
+            </div>
+          </div>
+        )}
+
         {/* Map legend overlay */}
         <div style={{ position: 'absolute', bottom: '16px', left: '16px', background: 'rgba(9, 14, 26, 0.85)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', fontSize: '11px', zIndex: 10, pointerEvents: 'none' }}>
           <div style={{ fontWeight: 'bold', marginBottom: '6px', color: 'var(--text-primary)' }}>Traffic Index</div>
