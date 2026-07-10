@@ -1,8 +1,29 @@
 import { Mqtt } from 'azure-iot-device-mqtt';
 import { Client, Message } from 'azure-iot-device';
 
-// Load connection string from environment variables
-const connectionString = process.env.IOTHUB_DEVICE_CONNECTION_STRING || "HostName=YOUR_IOTHUB_NAME.azure-devices.net;DeviceId=YOUR_DEVICE_ID;SharedAccessKey=YOUR_KEY";
+import * as fs from 'fs';
+import * as path from 'path';
+
+let connectionString: string = process.env.IOTHUB_DEVICE_CONNECTION_STRING || "";
+
+if (!connectionString) {
+  try {
+    const settingsPath = path.resolve(__dirname, '../../local.settings.json');
+    if (fs.existsSync(settingsPath)) {
+      const rawSettings = fs.readFileSync(settingsPath, 'utf-8');
+      const settings = JSON.parse(rawSettings);
+      if (settings.Values && settings.Values.IOTHUB_DEVICE_CONNECTION_STRING) {
+        connectionString = settings.Values.IOTHUB_DEVICE_CONNECTION_STRING;
+      }
+    }
+  } catch (err) {
+    // Ignore error and fall back
+  }
+}
+
+if (!connectionString) {
+  connectionString = "HostName=YOUR_IOTHUB_NAME.azure-devices.net;DeviceId=YOUR_DEVICE_ID;SharedAccessKey=YOUR_KEY";
+}
 
 const roads = [
   "MG Road",

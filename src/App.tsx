@@ -22,6 +22,7 @@ import { SmartParking } from './components/SmartParking';
 import { PublicTransitTracker } from './components/PublicTransitTracker';
 import { IncidentManager } from './components/IncidentManager';
 import { WeatherAlertSelector } from './components/WeatherAlertSelector';
+import { PowerBiAnalytics } from './components/PowerBiAnalytics';
 
 interface SystemAlert {
   id: string;
@@ -485,6 +486,10 @@ export default function App() {
               parking={parking}
               onReserveSpot={handleReserveSpot}
             />
+          </div>
+
+          <div className="dashboard-row">
+            <PowerBiAnalytics />
           </div>
         </div>
 
