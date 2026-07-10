@@ -6,15 +6,19 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "start": "func start"
+    "start": "func start",
+    "iot-sim": "node dist/src/iotSimulator.js"
   },
   "dependencies": {
     "@azure/functions": "^4.6.0",
+    "azure-iot-device": "^1.18.4",
+    "azure-iot-device-mqtt": "^1.16.4",
     "mssql": "^12.7.0"
   },
   "devDependencies": {
     "@types/mssql": "^12.3.0",
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1",
     "azure-functions-core-tools": "^4.12.1",
     "typescript": "^5.0.0"
   }

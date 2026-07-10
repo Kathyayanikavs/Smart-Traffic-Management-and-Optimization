@@ -6,6 +6,7 @@
     "DB_SERVER": "trafficserverkavya2026.database.windows.net",
     "DB_NAME": "trafficdb",
     "DB_USER": "trafficadmin",
-    "DB_PASSWORD": "Traffic@2026Azure!"
+    "DB_PASSWORD": "Traffic@2026Azure!",
+    "IOTHUB_DEVICE_CONNECTION_STRING": "HostName=YOUR_IOTHUB_NAME.azure-devices.net;DeviceId=YOUR_DEVICE_ID;SharedAccessKey=YOUR_KEY"
   }
 }
