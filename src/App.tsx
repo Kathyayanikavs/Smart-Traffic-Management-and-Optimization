@@ -489,7 +489,7 @@ export default function App() {
           </div>
 
           <div className="dashboard-row">
-            <PowerBiAnalytics />
+            <PowerBiAnalytics dbTraffic={dbTraffic} />
           </div>
         </div>
 
