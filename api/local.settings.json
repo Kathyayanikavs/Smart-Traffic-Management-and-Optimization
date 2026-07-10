@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "DB_SERVER": "trafficserverkavya2026.database.windows.net",
+    "DB_NAME": "trafficdb",
+    "DB_USER": "trafficadmin",
+    "DB_PASSWORD": "Traffic@2026Azure!"
+  }
+}
