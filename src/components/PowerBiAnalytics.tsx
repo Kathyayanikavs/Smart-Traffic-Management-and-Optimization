@@ -30,19 +30,20 @@ export const PowerBiAnalytics: React.FC<PowerBiAnalyticsProps> = ({ dbTraffic = 
     : activeData;
 
   // KPI Calculations
-  const totalVehicles = filteredData.reduce((acc, d) => acc + (d.vehicle_count || 0), 0);
+  const totalVehicles = filteredData.reduce((acc, d) => acc + Number(d.vehicle_count || 0), 0);
+  const sumSpeed = filteredData.reduce((acc, d) => acc + Number(d.average_speed || 0), 0);
   const avgSpeed = filteredData.length > 0 
-    ? (filteredData.reduce((acc, d) => acc + (d.average_speed || 0), 0) / filteredData.length).toFixed(2)
+    ? (sumSpeed / filteredData.length).toFixed(2)
     : '0.00';
-  const totalCongestion = filteredData.reduce((acc, d) => acc + (d.congestion_level || 0), 0);
+  const totalCongestion = filteredData.reduce((acc, d) => acc + Number(d.congestion_level || 0), 0);
 
   // Weather distribution for pie chart (Rainy, Sunny, Cloudy)
   const weatherCounts = activeData.reduce((acc: { [key: string]: number }, d) => {
     const w = d.weather || 'Sunny';
-    acc[w] = (acc[w] || 0) + (d.congestion_level || 0);
+    acc[w] = (acc[w] || 0) + Number(d.congestion_level || 0);
     return acc;
   }, {});
-  const totalWeatherCongestion = Object.values(weatherCounts).reduce((a, b) => a + b, 0);
+  const totalWeatherCongestion = Object.values(weatherCounts).reduce((a, b) => Number(a) + Number(b), 0);
 
   const toggleWeatherFilter = (weather: string) => {
     if (selectedWeather === weather) {
@@ -200,8 +201,8 @@ export const PowerBiAnalytics: React.FC<PowerBiAnalyticsProps> = ({ dbTraffic = 
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {filteredData.slice(0, 5).map((d, idx) => {
-                  const maxCount = Math.max(...filteredData.map(item => item.vehicle_count));
-                  const pct = maxCount > 0 ? (d.vehicle_count / maxCount) * 100 : 0;
+                  const maxCount = Math.max(...filteredData.map(item => Number(item.vehicle_count || 0)));
+                  const pct = maxCount > 0 ? (Number(d.vehicle_count || 0) / maxCount) * 100 : 0;
                   return (
                     <div key={idx} style={{ fontSize: '10px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', color: 'var(--text-secondary)' }}>
@@ -224,8 +225,8 @@ export const PowerBiAnalytics: React.FC<PowerBiAnalyticsProps> = ({ dbTraffic = 
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {filteredData.slice(0, 5).map((d, idx) => {
-                  const maxSpeed = Math.max(...filteredData.map(item => item.average_speed));
-                  const pct = maxSpeed > 0 ? (d.average_speed / maxSpeed) * 100 : 0;
+                  const maxSpeed = Math.max(...filteredData.map(item => Number(item.average_speed || 0)));
+                  const pct = maxSpeed > 0 ? (Number(d.average_speed || 0) / maxSpeed) * 100 : 0;
                   return (
                     <div key={idx} style={{ fontSize: '10px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', color: 'var(--text-secondary)' }}>
